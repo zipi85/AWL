@@ -1,0 +1,8 @@
+#Users who can control and manage patches application
+User_Alias PAT_USERS = oper, system
+
+#Patches application commands
+Cmnd_Alias APPLY_PATCHES = /usr/local/bin/DISABLE_apply_system_patches , /usr/local/bin/ENABLE_apply_system_patches  
+
+#User privilege specification
+PAT_USERS ALL=(root) NOPASSWD: APPLY_PATCHES

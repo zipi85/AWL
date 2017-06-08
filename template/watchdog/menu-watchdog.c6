@@ -1,0 +1,532 @@
+#!/bin/ksh 
+###########################################################################
+#
+# Watchdog
+#
+# Watchdog_activ_slot.ksh : Activation des slots dans le fichier watchdog.config
+#
+# Auteur : helene Pons le 29 mai 2008
+#
+###########################################################################
+TYPE_OS=`uname`
+if [ $TYPE_OS = 'Linux' ]
+then
+        DIR_WATCH=/etc/watchdot/
+        DIR_WATCH_LOG=/var/log/watchdot/
+else
+        if [ $TYPE_OS = 'SunOS' ]
+        then
+                DIR_WATCH=/opt/watch
+                DIR_WATCH_LOG=/opt/watch/log
+                else
+			if [ $TYPE_OS = 'AIX' ]
+		        then
+                		DIR_WATCH=/opt/watch
+                		DIR_WATCH_LOG=/opt/watch/log
+				else
+                        	echo "ERREUR, Type OS non reconnu"
+			fi
+        fi
+fi
+
+e_date=`date +"%y%m%d"`
+e_heure=`date +"%H%M%S"`
+
+
+fonc_visu_surveillance ()
+{
+NB_PROCESS=`ps -eaf | grep "watchdot -start" | grep -v grep | wc -l`
+if [ $NB_PROCESS -eq 1 ]
+        then
+        echo ""
+        echo "Watchdog est demarre :"
+	echo "--------------------"
+	wat -who
+        echo ""
+        echo "Version :"
+	echo "---------"
+	wat -v
+        echo ""
+	echo "slot actifs :"
+	echo "-------------"
+	wat -slots
+	for i in `wat -slots | grep ^slot`
+	do
+		case $i in
+		command) 
+        	echo ""
+		echo 'Scripts ou commandes de surveillance actives (wat command) :' 
+		echo "------------------------------------------------------------"
+		wat command ;;
+		file) 
+        	echo ""
+		echo 'Fichiers surveilles (wat file) :' 
+		echo "--------------------------------"
+		wat file ;;
+		logmon) 
+        	echo ""
+		echo 'Traces surveillees - messages d erreur trappes (wat logmon) :' 
+		echo "-----------------------------------------------------------"
+		wat logmon ;;
+		usage) 
+        	echo ""
+		echo 'Ressources systemes machine surveillees (wat usage) :' 
+		echo "----------------------------------------------------"
+		wat usage ;;
+		avail) 
+        	echo ""
+		echo 'FS surveilles (wat avail) :' 
+		echo "---------------------------"
+		wat avail ;;
+		batch)
+        	echo ""
+		echo 'Process surveilles (wat batch stat):'
+		echo "----------------------------------"
+		wat batch stat ;;
+		esac
+	done
+	fonc_retour_principal
+	else
+	echo "Watchdog n est pas demarre"
+fi
+}
+
+fonc_active_slot ()
+{
+grep $SLOT $DIR_WATCH/watchdog.config >>/dev/null
+CODE_RETOUR=$?
+	case $SLOT in
+	slot_avail) FIC_SLOT=$DIR_WATCH/avail.cfg ;;
+	slot_usage) FIC_SLOT=$DIR_WATCH/usage.cfg ;;
+	slot_logmon) FIC_SLOT=$DIR_WATCH/logmon.cfg ;;
+	slot_batch) FIC_SLOT=$DIR_WATCH/survbatch.cfg ;;
+	slot_file) FIC_SLOT=$DIR_WATCH/file.cfg ;;
+	slot_command) FIC_SLOT=$DIR_WATCH/command.cfg ;;
+	*)    echo "ERREUR, le slot n est pas reconnu"
+	      exit 1 ;;
+	esac
+	if ! test -s $FIC_SLOT
+	then
+	echo "fichier de conf pour le slot $SLOT inexistant"
+	exit 1
+	fi
+if [ $CODE_RETOUR -eq 0 ]; then
+#slot existant dans le fichier - modif
+	grep $SLOT $DIR_WATCH/watchdog.config | grep ^#
+	CODE_RETOUR1=$?
+		if [ $CODE_RETOUR1 -eq 0 ]; then
+# enlever le # pour activer
+		cp $DIR_WATCH/watchdog.config $DIR_WATCH/"watchdog.config_save."$e_date"_"$e_heure
+	STRING_ORI=`grep $SLOT $DIR_WATCH/watchdog.config | grep ^#`
+	sed "s/^$STRING_ORI/$SLOT/" $DIR_WATCH/"watchdog.config_save."$e_date"_"$e_heure >$DIR_WATCH/watchdog.config
+			if [ $? -ne 0 ]; then
+			echo "ERREUR modif $DIR_WATCH/watchdog.config"
+			echo "Restauration avec fic de save $DIR_WATCH/"watchdog.config_save."$e_date"_"$e_heure"
+			cp $DIR_WATCH/"watchdog.config_save."$e_date"_"$e_heure $DIR_WATCH/watchdog.config
+			exit 1
+			else 
+			echo "slot $SLOT active"
+			fonc_retour_principal
+			fi
+			else
+			if [ $CODE_RETOUR1 -eq 1 ]; then
+			echo "slot deja active"
+			fonc_retour_principal
+			fi
+		fi
+	else
+        if [ $CODE_RETOUR -eq 1 ]; then
+#slot inexistant dans le fichier - ajout
+	echo "slot inexistant - ajout"
+		cp $DIR_WATCH/watchdog.config $DIR_WATCH/"watchdog.config_save."$e_date"_"$e_heure
+		echo "$SLOT" >>$DIR_WATCH/watchdog.config
+		echo "#" >>$DIR_WATCH/watchdog.config
+	echo "slot $SLOT active"
+	fonc_retour_principal
+	fi
+fi
+}
+
+fonc_desactive_slot ()
+{
+#set -vx
+grep $SLOT $DIR_WATCH/watchdog.config >>/dev/null
+CODE_RETOUR=$?
+if [ $CODE_RETOUR -eq 0 ]; then
+#slot existant dans le fichier - modif
+	grep $SLOT $DIR_WATCH/watchdog.config | grep ^#
+	CODE_RETOUR1=$?
+		if [ $CODE_RETOUR1 -eq 0 ]; then
+		echo "slot $SLOT deja desactive"
+		fonc_retour_principal
+		else
+		grep $SLOT $DIR_WATCH/watchdog.config | grep ^slot
+			CODE_RETOUR2=$?
+			if [ $CODE_RETOUR2 -eq 0 ]; then
+			echo "slot $SLOT active, on le desactive"
+			cp $DIR_WATCH/watchdog.config $DIR_WATCH/"watchdog.config_save."$e_date"_"$e_heure
+			STRING_ORI=`grep $SLOT $DIR_WATCH/watchdog.config | grep ^slot`
+			sed "s/^$STRING_ORI/#$SLOT/" $DIR_WATCH/"watchdog.config_save."$e_date"_"$e_heure >$DIR_WATCH/watchdog.config
+			if [ $? -ne 0 ]; then
+			echo "ERREUR modif $DIR_WATCH/watchdog.config"
+			echo "Restauration avec fic de save $DIR_WATCH/"watchdog.config_save."$e_date"_"$e_heure"
+			cp $DIR_WATCH/"watchdog.config_save."$e_date"_"$e_heure $DIR_WATCH/watchdog.config
+			exit 1
+			else 
+			echo "slot $SLOT desactive"
+			fonc_retour_principal
+			fi
+			fi
+			fi
+else
+        if [ $CODE_RETOUR -eq 1 ]; then
+#slot inexistant dans le fichier - ajout
+	echo "slot $SLOT desactive"
+	fonc_retour_principal
+	fi
+fi
+}
+
+fonc_param_slot ()
+{
+#set -vx
+case $SLOT in
+        slot_avail) FIC_SLOT=$DIR_WATCH/avail.cfg ;;
+        slot_usage) FIC_SLOT=$DIR_WATCH/usage.cfg ;;
+        slot_logmon) FIC_SLOT=$DIR_WATCH/logmon.cfg ;;
+        slot_batch) FIC_SLOT=$DIR_WATCH/survbatch.cfg ;;
+        slot_file) FIC_SLOT=$DIR_WATCH/file.cfg ;;
+        slot_command) FIC_SLOT=$DIR_WATCH/command.cfg ;;
+        *)    echo "ERREUR, le slot n est pas reconnu"
+              exit 1 ;;
+esac
+echo "\n           Menu Parametrage - Action : \n"
+echo "           1 - Mise a jour $FIC_SLOT"
+echo "           2 - Retour arriere avec derniere sauvegarde"
+echo "           q - Sortie du menu  (quit)\n"
+if [[ -z $REP ]] ; then
+  read REP?"Votre choix : "
+fi
+case $REP in
+	'1')
+	REP=""
+	cp $FIC_SLOT $FIC_SLOT"_save."$e_date"_"$e_heure
+	if [ $? -ne 0 ]
+	then 
+	echo "ERREUR sauvegarde prealable"
+	exit 1
+	fi
+	vi $FIC_SLOT
+	echo "sauvegarde au prealable : $FIC_SLOT"_save."$e_date"_"$e_heure" 
+	fonc_retour_principal ;;
+        '2')
+	REP=""
+	FIC_RESTAUR=`ls -ltr "$FIC_SLOT"_save* | tail -1 | awk '{print $9}'`
+	echo "Retour arriere avec : $FIC_RESTAUR" 
+	cp $FIC_RESTAUR $FIC_SLOT
+	if [ $? -ne 0 ]
+        then
+        echo "ERREUR restauration"
+        exit 1
+        fi ;;
+	'q')
+	REP=""
+	fonc_menu_principal ;;
+        'Q')
+        REP=""
+	fonc_menu_principal ;;
+	*) echo "ERREUR, mauvais choix"
+	exit 1;;
+esac 
+}
+
+fonc_demarrage_watchdog ()
+{
+NB_PROCESS=`ps -eaf | grep "watchdot -start" | grep -v grep | wc -l`
+if [ $NB_PROCESS -eq 1 ]
+        then
+	echo "Watchdog deja demarre :"
+	ps -eaf | grep "watchdot -start" | grep -v grep
+	fonc_retour_principal
+	else
+	echo "Demarrage watchdog :"
+	wat -start
+	NB_PROCESS=`ps -eaf | grep "watchdot -start" | grep -v grep | wc -l`
+	if [ $NB_PROCESS -eq 1 ]
+	then
+	echo "===>  "
+	echo "Demarrage OK "
+	ps -eaf | grep "watchdot -start" | grep -v grep
+	echo "wat -who"
+	wat -who
+	echo "wat -slots"
+	wat -slots
+	fonc_retour_principal
+	else
+	echo "ERREUR : Regarder fichier de log dans $DIR_WATCH_LOG"
+	exit 1
+	fi 
+fi
+}
+
+fonc_arret_watchdog ()
+{
+NB_PROCESS=`ps -eaf | grep "watchdot -start" | grep -v grep | wc -l`
+if [ $NB_PROCESS -eq 0 ]
+        then
+	echo "Pas de process => Watchdog est deja arrete  :"
+	fonc_retour_principal
+	else
+	echo "Arret watchdog :"
+	wat -stop
+	sleep 5
+	NB_PROCESS=`ps -eaf | grep "watchdot -start" | grep -v grep | wc -l`
+	if [ $NB_PROCESS -eq 0 ]
+	then
+	echo "===>  "
+	echo "Arret OK "
+	echo "wat -who"
+	wat -who
+	fonc_retour_principal
+	else
+	echo "ERREUR : Regarder fichier de log dans $DIR_WATCH_LOG"
+	exit 1
+	fi 
+fi
+}
+
+fonc_menu_parametrage ()
+{
+echo "\n           Menu Watchdog Local - Parametrage - Choix du slot : \n"
+        echo "           1 - Parametrage slot_avail"
+        echo "           2 - Parametrage slot_usage (non dispo)"
+        echo "           3 - Parametrage slot_logmon"
+        echo "           4 - Parametrage slot_batch"
+        echo "           5 - Parametrage slot_file"
+        echo "           6 - Parametrage slot_command"
+        echo "           q - Quit\n"
+        if [[ -z $REP1 ]] ; then
+        read REP1?"Votre choix : "
+        fi
+                case $REP1 in
+                        '1')
+                        REP1=""
+                        SLOT=slot_avail
+                        fonc_param_slot slot_avail ;;
+                        '2')
+                        REP1=""$1
+                        SLOT=slot_usage
+                        echo "non dispo, slot reserve au systeme" ;;
+                        '3')
+                        REP1=""
+                        SLOT=slot_logmon
+                        fonc_param_slot slot_logmon ;;
+                        '4')
+                        REP1=""
+                        SLOT=slot_batch
+                        fonc_param_slot slot_batch ;;
+                        '5')
+                        REP1=""
+                        SLOT=slot_file
+                        fonc_param_slot slot_file ;;
+                        '6')
+                        REP1=""
+                        SLOT=slot_command
+                        fonc_param_slot slot_command ;;
+                        'q')
+                        REP1=""
+			fonc_menu_principal ;;
+                        'Q')
+                        REP1=""
+			fonc_menu_principal ;;
+                        *)    echo "ERREUR, mauvais choix"
+                        exit 1 ;;
+                esac 
+}
+
+fonc_desactivation_slot ()
+{
+        echo "\n           Menu Watchdog Local - Desactivation - Choix du slot : \n"
+        echo "           1 - Desactivation slot_avail"
+        echo "           2 - Desactivation slot_usage (non dispo)"
+        echo "           3 - Desactivation slot_logmon"
+        echo "           4 - Desactivation slot_batch"
+        echo "           5 - Desactivation slot_file"
+        echo "           6 - Desactivation slot_command"
+        echo "           q - Quit\n"
+        if [[ -z $REP1 ]] ; then
+        read REP1?"Votre choix : "
+        fi
+                case $REP1 in
+                        '1')
+                        REP1=""
+                        SLOT=slot_avail
+                        fonc_desactive_slot slot_avail ;;
+                        '2')
+                        REP1=""$1
+                        SLOT=slot_usage
+                        echo "non dispo, slot reserve au systeme" ;;
+                        '3')
+                        REP1=""
+                        SLOT=slot_logmon
+                        fonc_desactive_slot slot_logmon ;;
+                        '4')
+                        REP1=""
+                        SLOT=slot_batch
+                        fonc_desactive_slot slot_batch ;;
+                        '5')
+                        REP1=""
+                        SLOT=slot_file
+                        fonc_desactive_slot slot_file ;;
+                        '6')
+                        REP1=""
+                        SLOT=slot_command
+                        fonc_desactive_slot slot_command ;;
+                        'q')
+                        REP1=""
+                        fonc_menu_principal ;;
+                        'Q')
+                        REP1=""
+                        fonc_menu_principal ;;
+                        *)    echo "ERREUR, mauvais choix"
+                        exit 1 ;;
+                esac 
+}
+
+fonc_activation_slot ()
+{
+        echo "\n           Menu Watchdog Local - Activation - Choix du slot : \n"
+        echo "           1 - Activation slot_avail"
+        echo "           2 - Activation slot_usage"
+        echo "           3 - Activation slot_logmon"
+        echo "           4 - Activation slot_batch"
+        echo "           5 - Activation slot_file"
+        echo "           6 - Activation slot_command"
+        echo "           q - Quit\n"
+        if [[ -z $REP1 ]] ; then
+        read REP1?"Votre choix : "
+        fi
+                case $REP1 in
+                        '1')
+                        REP1=""
+                        SLOT=slot_avail
+                        fonc_active_slot slot_avail ;;
+                        '2')
+                        REP1=""$1
+                        SLOT=slot_usage
+                        fonc_active_slot slot_usage ;;
+                        '3')
+                        REP1=""
+                        SLOT=slot_logmon
+                        fonc_active_slot slot_logmon ;;
+                        '4')
+                        REP1=""
+                        SLOT=slot_batch
+                        fonc_active_slot slot_batch ;;
+                        '5')
+                        REP1=""
+                        SLOT=slot_file
+                        fonc_active_slot slot_file ;;
+                        '6')
+                        REP1=""
+                        SLOT=slot_command
+                        fonc_active_slot slot_command ;;
+                        'q')
+                        REP1=""
+                        fonc_menu_principal ;;
+                        'Q')
+                        REP1=""
+                        fonc_menu_principal ;;
+                        *)    echo "ERREUR, mauvais choix"
+                        exit 1 ;;
+                esac 
+}
+
+
+fonc_menu_principal ()
+{
+echo "\n           Menu Watchdog Local - Action : \n"
+echo "           1 - Visualisation surveillance activee"
+echo "           2 - Activation slot"
+echo "           3 - Desactivation slot"
+echo "           4 - Parametrage slot surveillance"
+echo "           5 - Arret watchdog"
+echo "           6 - Demarrage watchdog"
+echo "           q - Sortie du menu  (quit)\n"
+if [[ -z $REP ]] ; then
+  read REP?"Votre choix : "
+fi
+case $REP in
+        '1')
+        REP=""
+        REP1=""
+        fonc_visu_surveillance ;;
+  	'2')
+        REP=""
+        REP1=""
+	fonc_activation_slot ;;
+  	'3')
+        REP=""
+        REP1=""
+	fonc_desactivation_slot ;;
+  	'4')
+        REP=""
+        REP1=""
+	fonc_menu_parametrage ;;
+	'5')
+        REP=""
+        REP1=""
+	fonc_arret_watchdog ;;
+	'6')
+        REP=""
+        REP1=""
+	fonc_demarrage_watchdog ;;
+	'q')
+	REP1=""
+	exit 0 ;;
+	'Q')
+	REP1=""
+	exit 0 ;;
+	*)    echo "Pas encore disponible"
+	exit 0 ;;
+	esac
+}
+
+fonc_retour_principal ()
+{
+        echo ""
+        echo "Retour au menu principal : o/n"
+        read REP_RET?"Votre choix :"
+        case $REP_RET in
+                'o')
+                REP_RET=""
+                fonc_menu_principal ;;
+                'O')
+                REP_RET=""
+                fonc_menu_principal ;;
+                'n')
+                exit 0 ;;
+                'N')
+                exit 0 ;;
+                *) echo "ERREUR, mauvais choix"
+                exit 1 ;;
+                esac
+}
+
+# M A I N
+#
+fonc_menu_principal
+
+# Suppression des vieux fichiers de sauvegardes
+find $DIR_WATCH -name "watchdog.config_save*" -mtime +5 -exec ls -al {} \; 
+find $DIR_WATCH -name "watchdog.config_save*" -mtime +5 -exec rm -rf {} \; 
+find $DIR_WATCH -name "avail.cfg_save*" -mtime +10 -exec ls -al {} \; 
+find $DIR_WATCH -name "avail.cfg_save*" -mtime +10 -exec rm -rf {} \; 
+find $DIR_WATCH -name "command.cfg_save*" -mtime +10 -exec ls -al {} \; 
+find $DIR_WATCH -name "command.cfg_save*" -mtime +10 -exec rm -rf {} \; 
+find $DIR_WATCH -name "file.cfg_save*" -mtime +10 -exec ls -al {} \; 
+find $DIR_WATCH -name "file.cfg_save*" -mtime +10 -exec rm -rf {} \; 
+find $DIR_WATCH -name "logmon.cfg_save*" -mtime +10 -exec ls -al {} \; 
+find $DIR_WATCH -name "logmon.cfg_save*" -mtime +10 -exec rm -rf {} \; 
+find $DIR_WATCH -name "survbatch.cfg_save*" -mtime +10 -exec ls -al {} \; 
+find $DIR_WATCH -name "survbatch.cfg_save*" -mtime +10 -exec rm -rf {} \; 

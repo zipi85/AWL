@@ -1,0 +1,6 @@
+/var/log/clamav/freshclam.log {
+        missingok
+        notifempty
+        create 644 clam clam
+}
+

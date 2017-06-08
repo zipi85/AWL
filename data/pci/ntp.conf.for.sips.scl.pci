@@ -1,0 +1,25 @@
+# For more information about this file, see the man pages
+# ntp.conf(5), ntp_acc(5), ntp_auth(5), ntp_clock(5), ntp_misc(5), ntp_mon(5).
+
+driftfile /var/lib/ntp/drift
+
+# Prevent NTP ddos attacks
+disable monitor
+
+# Strate 2 Servers
+server ntp01.sips.scl.priv.atos.fr prefer
+server ntp02.sips.scl.priv.atos.fr
+
+## Prevent any NTP synchronization on this server
+restrict default ignore
+restrict -6 default ignore
+
+
+# Permit all access over the loopback interface.  This could
+# be tightened as well, but to do so would effect some of
+# the administrative functions.
+restrict 127.0.0.1
+restrict -6 ::1
+
+restrict ntp01.sips.scl.priv.atos.fr
+restrict ntp02.sips.scl.priv.atos.fr

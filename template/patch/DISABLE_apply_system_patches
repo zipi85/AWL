@@ -1,0 +1,44 @@
+#!/bin/bash
+#set -vx
+###########################################################################
+# DISABLE_apply_script_patches
+#
+# This script is used to prevent the execution of the script patching
+# Rename the shutter file apply_system_patches.LAUNCH to apply_system_patches.STOP 
+#
+# Author : Helene Pons - V0  - 24/06/14
+#
+###########################################################################
+#
+#
+func_disable_patches ()
+{
+mv $LAUNCH_FILE $STOP_FILE >>/dev/null 2>>/dev/null
+        if [ $? -ne 0 ]
+        then
+	ls -al $LAUNCH_FILE >>/dev/null 2>>/dev/null
+		if [ $? -eq 2 ]
+		then
+		echo "`date +"%b %d %H:%M:%S"` - Manual Blocking already activated - Patches application disabled - Exit - Done"
+        	logger -t WARNING_$TAG "Script $0 - Manual Blocking already activated - Patches application disabled - Exit - Done"
+		else
+		echo "`date +"%b %d %H:%M:%S"` - ERROR - To do escalation "
+		logger -t ERROR_$TAG "Script $0 - To do escalation  - Done"
+		fi
+	else
+        echo "`date +"%b %d %H:%M:%S"` - Manual Blocking activated - Patches application disabled - Exit - Done"
+        logger -t WARNING_$TAG "Script $0 - Manual Blocking activated - Patches application disabled - Exit - Done"
+	fi
+}
+
+#
+# M A I N
+#
+e_date=`date +"%Y%m%d"`
+e_heure=`date +"%H%M%S"`
+TAG=DISABLE_APPLY_PATCHES_SYSTEM
+LAUNCH_FILE="/etc/apply_system_patches.LAUNCH"
+STOP_FILE="/etc/apply_system_patches.STOP"
+#
+func_disable_patches
+#

@@ -1,0 +1,6 @@
+
+## ClamAV
+File /var/log/clamav/clamscan.log.%y%m%d cumul
+!Infected files: 0
+Infected files [ident=SYS-CLA-0001] [criticity=MAJOR]
+

@@ -1,0 +1,134 @@
+#!/bin/bash
+#Code retour pour le check NRPE de Nagios
+#
+#0 OK The plugin was able to check the service and it appeared to be functioning properly
+#1 Warning The plugin was able to check the service, but it appeared to be above some "warning" threshold or did not appear to be working properly
+#2 Critical The plugin detected that either the service was not running or it was above some "critical" threshold
+#3 Unknown Invalid command line arguments were supplied to the plugin or low-level failures internal to the plugin (such as unable to fork, or open a tcp socket) that prevent it from performing the specified operation. Higher-level errors (such as name resolution errors, socket timeouts, etc) are outside of the control of plugins and should generally NOT be reported as UNKNOWN states.
+#
+#
+# Nagios plugin in order to check if the time lag with the NTP server is under what you need
+# Syntax : ./check_ntpdate -w [Warning time (seconds)] -c [Critical time (seconds)]
+# Exemple : ./check_ntpdate -w 1 -c 2
+# Beware ! Warning must be an integer below Critical.
+#
+# OK 20/09/11
+# Modif NTT le 16/01/2013 remplacement de cut par awk
+
+#[[ ${LOGNAME} != "root" ]] && echo " You have to be root !!" && exit 255
+
+
+##Definition
+VERSION="1.0"
+SCRIPTNAME="check_ntpdate"
+NTPCONF=/etc/ntp.conf
+
+
+
+# Plugin return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+# Default variables
+DESCRIPTION="Unknown"
+STATE=$STATE_UNKNOWN
+
+
+# Default options
+WARNING_SEC=1
+CRITICAL_SEC=2
+
+#Functions
+# Option processing
+print_usage() {
+  echo "Usage: ./check_ntpdate -w 1 -c 2"
+  echo "  $SCRIPTNAME -w INTEGER (default 1)"
+  echo "  $SCRIPTNAME -c INTEGER (default 2)"
+  echo "  $SCRIPTNAME -h"
+  echo "  $SCRIPTNAME -V"
+}
+print_version() {
+  echo $SCRIPTNAME version $VERSION
+  echo ""
+  echo "Written by LARTIGUE Kevin 2011/03/16"
+}
+
+# Change explanations if needed
+print_help() {
+  print_version
+  echo ""
+  print_usage
+  echo ""
+  echo "Check if the time lag with the NTP server is under what you need"
+  echo ""
+  echo "-w INTEGER"
+  echo "   Warning level in seconds (default: 1)"
+  echo "-c INTEGER"
+  echo "   Critical level in seconds (default: 2)"
+  echo "-h"
+  echo "   Print this help screen"
+  echo "-V"
+  echo "   Print version and information"
+
+}
+
+while getopts w:c:hV OPT
+do
+  case $OPT in
+    w) WARNING_SEC=$OPTARG  ;;
+    c) CRITICAL_SEC=$OPTARG ;;
+    h)
+      print_help
+      exit $STATE_UNKNOWN
+      ;;
+    V)
+      print_version
+      exit $STATE_UNKNOWN
+      ;;
+   esac
+done
+
+#Does the NTPCONF file exist ?
+if [[ -f $NTPCONF ]]
+  then
+ true
+  else
+  echo "File $NTPCONF not present !"
+exit $STATE_UNKNOWN
+fi
+
+###################
+##  Main process ##
+###################
+#Extracting the address of the NTP server in the ntp.conf file
+SERVERNTP=$(egrep -v '^(#)' $NTPCONF | grep "server" | head -1 |awk '{ print $2 }')
+#Time lag with the NTP server
+OFFSET=$(ntpdate -q $SERVERNTP | awk '{ print $10 }' | tail -1)
+#Absolute value of offset
+OFFSET=${OFFSET#-}
+#Comparing decimal numbers
+if [[ $(echo "$OFFSET > $CRITICAL_SEC"| bc) -eq 1 ]]
+then
+STATE=$STATE_CRITICAL
+fi
+
+if [[ $(echo "$OFFSET > $WARNING_SEC"| bc) -eq 1 ]]
+then
+  if [ $STATE = 2 ]
+      then
+      #STATE=$STATE_CRITICAL
+      echo "CRITICAL -- Time is not well synchronized -- Time Lag : $OFFSET seconds"
+      else
+      STATE=$STATE_WARNING
+        echo "WARNING -- Time is not well synchronized --Time Lag : $OFFSET seconds"
+  fi
+else
+STATE=$STATE_OK
+echo "OK -- Time is synchronized -- Time Lag : $OFFSET second"
+fi
+
+#echo $DESCRIPTION
+# STATE retrun the value of the return code $?
+exit $STATE

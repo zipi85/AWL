@@ -1,0 +1,461 @@
+#!/bin/bash
+#set -vx
+###########################################################################
+#
+# In order to be conformed PCI, it is necessary to apply patches every months
+#
+# This script
+# 1 - checks if there is enought space and if the repositories are disabled
+# 2 - applies patches
+# 3 - checks if the patches have been correctly installed
+# 4 - Reboot server
+#
+# Author : Helene Pons - V0  - 30/01/14
+#        : Philippe Maupertuis 20/04/16
+#        : Philippe Maupertuis 16/08/16 (add PATH)
+#	 : Christophe Villemont 06/01/17 (add disable-repos for C7)
+#        : Gael Moncelet 22/02/17 (add pre-update, post-update-ok, post-update-ko, update log,echo msg tripwire,aide )
+#
+###########################################################################
+#
+# USAGE
+usage() {
+    echo "$prog --reboot yes|no --monitoring yes|no"
+    echo "      --reboot : execute a reboot after the update"
+    echo "      --monitoring: send a spoolmess to the operators"
+    exit 1
+}
+#
+func_check_channel ()
+{
+while read canal;do
+        dt=$(echo $canal|awk -F'-' '{print $NF}')
+        echo canal : $canal date : $dt
+        if [[ $(date -d$dt +"%Y%m") -ne $(date  +"%Y%m") ]]; then
+                echo $canal has a wrong date $dt
+                return 1
+        fi
+done <<EOT
+$(rhn-channel -l|grep cloned)
+EOT
+return 0
+
+}
+#
+func_log_yum ()
+{
+    if [ $VERSION_OS = "5" ]; then
+        # yum history not available ; workaround
+        if [ -s /var/log/yum.log ] ; then
+            tail -n1 /var/log/yum.log |awk '{print $1" "$2}'|xargs -I dd grep -E '^dd' /var/log/yum.log|logger -t $TAG
+        else
+            logger -t $TAG 'No yum log available'
+        fi
+    else
+        yum history info|logger -t $TAG
+    fi
+}
+#
+func_control_usage ()
+{
+# control arguments
+if [[ -z $REB_RESP || -z $PIL_RESP ]]; then
+    echo "Options -r and -m are required arguments." >&2
+    usage
+fi
+#
+case $REB_RESP in
+        "yes")
+        ;;
+        "no")
+        ;;
+        *)
+        echo "Options -r and -m are required arguments with no or yes ." >&2
+        usage ;;
+esac
+#
+case $PIL_RESP in
+        "yes")
+        ;;
+        "no")
+        ;;
+        *)
+        echo "Options -r and -m are required arguments with no or yes ." >&2
+        usage ;;
+esac
+}
+#
+func_pre_control ()
+{
+#
+if test -f $LAUNCH_FILE
+then
+        echo "`date +"%b %d %H:%M:%S"` - No manual blocking - Running "
+        logger -t $TAG "Script $0 - No manual blocking - Running "
+else
+        echo "`date +"%b %d %H:%M:%S"` - Manual blocking - STOP - EXIT "
+        logger -t ERROR_$TAG "Script $0 - Manual blocking - STOP - EXIT "
+        exit 1
+fi
+#
+# integrity control - check
+if test -f /sbin/aide
+then
+/sbin/aide -C
+if [ $? -ne 0 ]
+then
+        /bin/logger -f /var/log/aide/aide.log -p local2.info -t system-aide-check-report
+        grep "AIDE 0.15.1 found differences" /var/log/aide/aide.log
+        if [ $? -eq 0 ]
+        then
+                echo "AIDE - integrity control => OK"
+                logger -t $TAG "Script $0 - integrity control done  - Running "
+        else
+                echo "WARNING_$TAG - Warning func_pre_control--- AIDE - file violation detected "
+                logger -t WARNING_$TAG "Warning func_pre_control--- AIDE - file violation detected "
+        fi
+else
+        /bin/logger -f /var/log/aide/aide.log -p local2.info -t system-aide-check-report
+        echo "AIDE - integrity control => OK"
+       logger -t $TAG "Script $0 - integrity control done  - Running "
+fi
+else
+        if test -f /usr/local/tripwire/tfs/gentrip/tripwire_check.ksh
+        then
+        /usr/local/tripwire/tfs/gentrip/tripwire_check.ksh >>$INTEGRITY_TRACE 2>>$INTEGRITY_TRACE
+        grep 'VIOLATION' $INTEGRITY_TRACE
+        if [ $? -ne 0 ]
+        then
+                echo "WARNING_$TAG - Warning func_pre_control--- TRIPWIRE - file violation detected "
+                logger -t WARNING_$TAG "Warning func_pre_control--- TRIPWIRE - file violation detected "
+                rm $INTEGRITY_TRACE
+        else
+                echo "TRIPWIRE - integrity control => OK"
+                logger -t $TAG "Script $0 - integrity control done  - Running "
+                rm $INTEGRITY_TRACE
+        fi
+        else
+        echo "INFO_$TAG - info func_pre_control--- integrity control missing"
+        logger -t $TAG "Script $0 - integrity control missing  - Running "
+        INTEGRITY_CONTROL="NOK"
+        fi
+fi
+#
+if test -s $DEP_FILE
+then
+echo "`date +"%b %d %H:%M:%S"` - There are some dependencies - Test "
+logger -t $TAG "Script $0 - Dependencies test  - Running"
+        for i in `cat $DEP_FILE`
+        do
+        test -n '$i'
+        if [ $? -eq 0 ]
+          then
+          ping -c1 -w1 $i >>/dev/null
+          if [ $? -ne 0 ]
+          then
+          echo "`date +"%b %d %H:%M:%S"` - Dependence $i not ok - Exit - Done"
+          logger -t WARNING_$TAG "Script $0 - Dependence $i not ok - Exit - Done"
+          exit 1
+          else
+          echo "`date +"%b %d %H:%M:%S"` - Dependence $i OK - Running"
+          logger -t $TAG "Script $0 - Dependence $i OK - Running"
+          ping -c1 -w1 $i | grep "packet"
+          fi
+        fi
+        done
+else
+echo "`date +"%b %d %H:%M:%S"` - No dependence - Running "
+logger -t $TAG "Script $0 - No dependence - Running"
+fi
+
+
+# run local PRE_UPDATE script, if present
+if test -s $PRE_UPDATE
+then
+  echo "`date +"%b %d %H:%M:%S"` - There is a pre-update script file to execute "
+  # execution du script PRE_UPDATE
+  $PRE_UPDATE
+  if [ $? -ne 0 ]
+      then
+      echo "ERROR_$TAG - Error func_pre_control--- script pre-update"
+      logger -t ERROR_$TAG "Error func_pre_control--- script pre-update"
+      exit 1
+  fi
+fi
+
+
+
+/bin/rm -rf /var/cache/yum/*
+if [ $? -ne 0 ]
+then
+        echo "ERROR_$TAG - Error func_pre_control--- command rm"
+        logger -t ERROR_$TAG "Error func_pre_control--- command rm"
+        exit 1
+else
+        echo "/var/cache/yum/ empty => OK"
+fi
+#
+/usr/local/bin/disable-repos
+if [ $? -ne 0 ]
+then
+        echo "ERROR_$TAG - Error func_pre_control--- script disable-repos"
+        logger -t ERROR_$TAG "Error func_pre_control--- script disable-repos"
+        exit 1
+else
+        echo "disable-repos => OK"
+fi
+# check cloned channels are set for the current month
+if  func_check_channel
+then
+        echo "`date +"%b %d %H:%M:%S"` - Cloned chanels ok "
+        logger -t $TAG "Script $0 - Cloned chanels ok "
+else
+        echo "`date +"%b %d %H:%M:%S"` - Cloned chanels : wrong date STOP - EXIT"
+        logger -t $TAG "Script $0 - Cloned chanels : wrong date STOP - EXIT"
+        exit 1
+fi
+#
+# remove older kernels
+if [[ -f $(which package-cleanup) ]]
+then
+    package-cleanup --oldkernels --count=2 -y
+    func_log_yum
+else
+    echo "`date +"%b %d %H:%M:%S"` - package-cleanup not found, no kernel removed"
+    logger -t $TAG "Script $0 - package-cleanup not found, no kernel removed"
+fi
+#
+}
+#
+func_apply_patches ()
+{
+yum check-update
+Return_Code1=$?
+if [ $Return_Code1 -ne 0 ]
+then
+        if [ $Return_Code1 -eq 100 ]
+        then
+            echo "`date +"%b %d %H:%M:%S"` - Patches availables to apply this month"
+
+            yum --disablerepo=* --enablerepo=cha-* update -y
+            rc_update=$?
+            func_log_yum
+            if [ $rc_update -ne 0 ]
+                    then
+                        echo "ERROR_$TAG - Error func_apply_patches --- command yum update"
+                        logger -t ERROR_$TAG "Error func_apply_patches --- command yum update"
+                        exit 1
+                    else
+                        /usr/local/bin/disable-repos
+                        if [ $? -ne 0 ]
+                                then
+                                        echo "ERROR_$TAG - Error func_apply_patches--- script disable-repos"
+                                        logger -t ERROR_$TAG "Error func_apply_patches--- script disable-repos"
+                                        exit 1
+                                else
+                                        echo "disable-repos => OK"
+                        fi
+            fi
+        else
+            echo "ERROR_$TAG - Error func_apply_patches --- command yum check-update"
+            logger -t ERROR_$TAG "Error func_apply_patches --- command yum check-update"
+            exit 1
+        fi
+else
+echo "`date +"%b %d %H:%M:%S"` - No patch available this month"
+logger -t $TAG "Script $0 - No patch available this month - Done"
+exit 1
+fi
+}
+#
+func_post_control ()
+{
+yum check-update
+if [ $? -eq 0 ]
+then
+        echo "Patches applied correctly"
+        logger -t $TAG "Script $0 - Patches applied correctly - Running "
+
+        # run local POST_UPDATE_OK script, if present
+        if test -s $POST_UPDATE_OK
+        then
+          echo "`date +"%b %d %H:%M:%S"` - There is a post-update-ok script file to execute "
+          # execution du script POST_UPDATE_OK
+          $POST_UPDATE_OK
+          if [ $? -ne 0 ]
+              then
+              echo "ERROR_$TAG - Error func_post_control--- script post-update-ok"
+              logger -t ERROR_$TAG "Error func_post_control--- script post-update-ok"
+          fi
+        fi
+
+        # POST UPDATE SPECIFIQUE POUR LES REDHAT5
+        if [ $VERSION_OS = "5" ]
+        then
+          if test -s $POST_UPDATE_C5
+            then
+            echo "`date +"%b %d %H:%M:%S"` - There is a post-update (for C5) script file to execute "
+            $POST_UPDATE_C5
+                    if [ $? -ne 0 ]
+                            then
+                            echo "ERROR_$TAG - Error func_post_control--- script post-update"
+                            logger -t ERROR_$TAG "Error func_post_control--- script post-update for C5"
+                            exit 1
+                    else
+                    echo "post-update => OK"
+                    fi
+          fi
+        fi
+
+        # integrity control - database update
+                if test -f /sbin/aide
+                        then
+                        /sbin/aide -i -B database_out=file:/var/lib/aide/aide.db.gz
+                        if [ $? -eq 0 ]
+                                then
+                                echo "AIDE - integrity control => OK"
+                                logger -t $TAG "Script $0 - integrity control - database updated done  - Running "
+                                else
+                                echo "WARNING_$TAG - Error func_post_control--- AIDE - integrity control - database updated - NOK"
+                                logger -t WARNING_$TAG "Error func_post_control--- AIDE - integrity control - database updated - NOK"
+                        fi
+                else
+                if test -f /usr/local/tripwire/tfs/gentrip/tripwire_check.ksh
+                        then
+                        NUM_CODE=`hostname|rev|cut -b 2,3`
+                        /usr/local/tripwire/tfs/bin/tripwire --init -P `hostname|rev|cut -b 2,3`tripwire
+                        /usr/local/tripwire/tfs/gentrip/tripwire_check.ksh >>$INTEGRITY_TRACE 2>>$INTEGRITY_TRACE
+                        grep 'VIOLATION' $INTEGRITY_TRACE
+                        if [ $? -ne 0 ]
+                                then
+                                echo "WARNING_$TAG - Error func_pre_control--- TRIPWIRE - integrity control NOK"
+                                logger -t WARNING_$TAG "Error func_pre_control--- TRIPWIRE - integrity control NOK"
+                                rm $INTEGRITY_TRACE
+                        else
+                                echo "TRIPWIRE - integrity control => OK"
+                                logger -t $TAG "Script $0 - integrity control done  - Running "
+                                rm $INTEGRITY_TRACE
+                        fi
+                else
+                echo "INFO_$TAG - info func_pre_control--- integrity control missing"
+                logger -t $TAG "Script $0 - integrity control missing  - Running "
+                INTEGRITY_CONTROL="NOK"
+                fi
+                fi
+else
+        echo "ERROR_$TAG - Error func_post_control --- command yum check-update"
+        logger -t ERROR_$TAG "Error func_post_control --- command yum check-update"
+
+        # run local POST_UPDATE_KO script, if present
+        if test -s $POST_UPDATE_KO
+        then
+          echo "`date +"%b %d %H:%M:%S"` - There is a post-update-ko script file to execute "
+          # execution du script POST_UPDATE_KO
+          $POST_UPDATE_KO
+          if [ $? -ne 0 ]
+              then
+              echo "ERROR_$TAG - Error func_post_control--- script post-update-ko"
+              logger -t ERROR_$TAG "Error func_post_control--- script post-update-ko"
+              exit 1
+          fi
+        fi
+
+
+        exit 1
+fi
+}
+#
+func_monitoring ()
+{
+echo "`date +"%b %d %H:%M:%S"` - $TAG Script $0 - Monitoring Send spoolmess - Running "
+logger -t $TAG "Script $0 - Monitoring Send spoolmess - Running "
+echo "spoolmess MUT-999-0600 NORMAL Server `hostname` will now reboot for a planned maintenance"
+spoolmess MUT-999-0600 NORMAL "Server `hostname` will now reboot for a planned maintenance"
+if [ $? -ne 0 ]
+then
+        echo "ERROR_$TAG - Error func_monitoring---  command spoolmess"
+        logger -t ERROR_$TAG "Error func_monitoring---  command spoolmess"
+        exit 1
+fi
+if [ -e /proc/xen ]; then
+        if grep -i control_d /proc/xen/capabilities >/dev/null 2>/dev/null
+        then
+        for i in `xm list | awk '{ print $1 }' | egrep -v "Name|Domain"`
+        do
+        echo "spoolmess MUT-999-0600 NORMAL Server $i will now reboot for a planned maintenance"
+        spoolmess MUT-999-0600 NORMAL "Server $i will now reboot for a planned maintenance"
+        if [ $? -ne 0 ]
+                then
+                echo "ERROR_$TAG - Error func_monitoring---  command spoolmess"
+                logger -t ERROR_$TAG "Error func_monitoring---  command spoolmess"
+                exit 1
+        fi
+        done
+        fi
+fi
+}
+#
+func_reboot ()
+{
+reboot
+if [ $? -eq 0 ]
+then
+        echo "Reboot server after applying patches"
+fi
+}
+#
+# M A I N
+#
+PATH=/sbin:/usr/sbin:$PATH:/usr/local/bin
+e_date=`date +"%Y%m%d"`
+e_heure=`date +"%H%M%S"`
+TRACE=/var/log/system_patches.log.$e_date.$e_heure
+INTEGRITY_TRACE=/var/log/system_patches_integrity.log.$e_date.$e_heure
+TAG=APPLY_PATCHES_SYSTEM
+VERSION_OS=`cat /etc/redhat-release |cut -d'.' -f1 |tail -c -2`
+DEP_FILE="/etc/apply_system_patches.dependencies"
+LAUNCH_FILE="/etc/apply_system_patches.LAUNCH"
+# script executed before update :
+PRE_UPDATE="/usr/local/bin/pre-update"
+# script executed after a succesfull update 
+POST_UPDATE_OK="/usr/local/bin/post-update-ok"
+# script executed after a failed update
+POST_UPDATE_KO="/usr/local/bin/post-update-ko"
+# script executed after update (on any case) on C5 servers
+POST_UPDATE_C5="/usr/local/bin/post-update"
+
+#
+while [[ $# -gt 0 ]]; do
+    opt=$1
+    shift;
+
+    case $opt in
+        "-r"|"--reboot"     ) REB_RESP="$1"; shift;;
+        "-m"|"--monitoring" ) PIL_RESP="$1"; shift;;
+        "-h"|"--help"       ) usage ;;
+        *                   ) echo "Invalid option: \""$opt"\"" >&2
+                              exit 1;;
+    esac
+done
+#
+func_control_usage
+#
+echo "`date +"%b %d %H:%M:%S"` - $TAG Script $0 - Starting - with Reboot $REB_RESP and Monitoring $PIL_RESP"
+logger -t $TAG "Script $0 - Starting"
+func_pre_control
+func_apply_patches
+func_post_control
+if [ $REB_RESP = "yes" ]
+then
+        if [ $PIL_RESP = "yes" ]
+        then
+                func_monitoring
+                sleep 10
+        fi
+        echo "`date +"%b %d %H:%M:%S"` - $TAG Script $0 - Reboot server after applying patches - Done "
+        func_reboot
+        logger -t $TAG "Script $0 - Reboot server after applying patches - Done "
+else
+        echo "`date +"%b %d %H:%M:%S"` - $TAG Script $0 - No Reboot Automatic - Done "
+        logger -t $TAG "Script $0 - No Reboot Automatic - Done "
+fi

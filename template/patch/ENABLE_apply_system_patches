@@ -1,0 +1,43 @@
+#!/bin/bash
+#set -vx
+###########################################################################
+# ENABLE_apply_script_patches
+#
+# This script is used to activate the execution of the script patching
+# Rename the shutter file apply_system_patches.STOP to apply_system_patches.LAUNCH
+#
+# Author : Helene Pons - V0  - 24/06/14
+#
+###########################################################################
+#
+func_enable_patches ()
+{
+mv $STOP_FILE $LAUNCH_FILE >>/dev/null 2>>/dev/null
+        if [ $? -ne 0 ]
+        then
+	ls -al $LAUNCH_FILE >>/dev/null 2>>/dev/null
+		if [ $? -eq 0 ]
+		then
+		echo "`date +"%b %d %H:%M:%S"` - Manual Blocking already removed - Patches application enabled - Exit - Done"
+        	logger -t WARNING_$TAG "Script $0 - Manual Blocking already removed - Patches application enabled - Exit - Done"
+		else
+		echo "`date +"%b %d %H:%M:%S"` - ERROR - To do escalation "
+		logger -t ERROR_$TAG "Script $0 - To do escalation  - Done"
+		fi
+	else
+	echo "`date +"%b %d %H:%M:%S"` - Manual Blocking removed - Patches application enabled- Exit - Done"
+       	logger -t WARNING_$TAG "Script $0 - Manual Blocking removed - Patches application enabled - Exit - Done"
+	fi
+}
+
+#
+# M A I N
+#
+e_date=`date +"%Y%m%d"`
+e_heure=`date +"%H%M%S"`
+TAG=ENABLE_APPLY_PATCHES_SYSTEM
+LAUNCH_FILE="/etc/apply_system_patches.LAUNCH"
+STOP_FILE="/etc/apply_system_patches.STOP"
+#
+func_enable_patches
+#

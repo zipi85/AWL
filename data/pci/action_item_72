@@ -1,0 +1,18 @@
+#!/bin/bash 
+timestart=$(date +'%m/%d/%Y %T')
+PATH=/sbin:$PATH
+export PATH
+HOSTNAME=$(hostname)
+FIC=/home/$SUDO_USER/$HOSTNAME-$(basename $0)-$(date +%Y).txt
+touch $FIC
+> $FIC
+chown $SUDO_USER $FIC
+
+echo "###########################################################" >>$FIC
+date >$FIC
+echo "###########################################################" >>$FIC
+echo "Pending Updates" >>$FIC
+yum check-update -d0|grep -vE '^$' |nl|sed "s/^/[pending:] /">>$FIC
+echo "###########################################################" >>$FIC
+echo "End of script" >>$FIC
+

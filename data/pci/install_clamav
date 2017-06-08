@@ -1,0 +1,8 @@
+#!/bin/bash
+if rpm -q clamav >/dev/null; then
+    yum update -y clamav clamav-db --enablerepo=pvm-main --enablerepo=pvm-external
+else
+    yum install -y clamav --enablerepo=pvm-main --enablerepo=pvm-external
+fi
+/bin/rm /var/lib/clamav/mirrors.dat
+/usr/bin/vim -es /etc/freshclam.conf  -c'%s/^DatabaseMirror/#DatabaseMirror/g' -c':execute "normal oDatabaseMirror freshclam.priv.atos.fr \<Esc>"' -c'wq'

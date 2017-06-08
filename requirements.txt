@@ -1,0 +1,3 @@
+fabric
+dataset>=0.3.14
+fexpect==0.2.post7

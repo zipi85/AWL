@@ -1,0 +1,28 @@
+#!/bin/bash
+#set -x
+
+#-------------------------------------------------------------------------------
+# Delete centos official repo and if the server is connected to spacewalk
+# disable all internal repo
+#-------------------------------------------------------------------------------
+
+# delete centos official repos
+rm -f /etc/yum.repos.d/CentOS-*.repo &> /dev/null
+
+# check if the RHN plugin is installed and enabled
+grep "^\W*enabled\W*=\W*1" /etc/yum/pluginconf.d/rhnplugin.conf &> /dev/null
+spacewalk=$?
+
+# check if a repo is enabled
+grep "^\W*enabled\W*=\W*1" /etc/yum.repos.d/*.repo &> /dev/null
+internal_repos=$?
+
+# disable repos
+# return an error if the host is not connected to spacewalk
+if [ $spacewalk -eq 0 ] ; then
+    if [ $internal_repos -eq 0 ] ; then
+        sed -i 's/^\W*enabled\W*=\W*1/enabled = 0/g' /etc/yum.repos.d/*
+    fi
+else
+    exit 1
+fi

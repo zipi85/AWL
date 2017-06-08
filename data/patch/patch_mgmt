@@ -1,0 +1,239 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import getpass
+import paramiko
+import logging
+
+from optparse import OptionParser, OptionGroup
+from datetime import datetime
+
+
+# Variables
+admin_server = 'ypbfi001v'
+admin_repo_log = '/DATA/tmp'
+
+command_to_disable_patch_mgmt = 'sudo /usr/local/bin/DISABLE_apply_system_patches'
+command_to_enable_patch_mgmt  = 'sudo /usr/local/bin/ENABLE_apply_system_patches'
+
+das = getpass.getuser()
+roles = ['system', 'oper', das]
+
+
+def run_ssh_command(host, command, username=None):
+    """Run a command on a distant server via ssh."""
+
+    # http://docs.paramiko.org
+    client = paramiko.SSHClient()
+    client.load_system_host_keys()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        client.connect(host, username=username)
+        print "executing '%s' on '%s' with user '%s'" % (command, host, username)
+        # stdin, stdout and stderr are python file-like object
+        stdin, stdout, stderr = client.exec_command(command)
+        return_code = stdout.channel.recv_exit_status()
+        result = stdout.readlines()
+        client.close()
+    except paramiko.ssh_exception.AuthenticationException:
+        # In case of connection error, retry with the das user
+        if username is not das:
+            print "retrying with user %s" % das
+            result, return_code = run_ssh_command(host, command, das)
+        else:
+            print "Cannot connect to %s with %s" % (host, username)
+            # A tuple is expected to be able to pass to the next host
+            result = "connection error"
+            return_code = 1
+
+    return (result, return_code)
+
+
+def upload(host, src, dst, username=None):
+    """Upload a file on a distant server"""
+
+    # setup, see http://docs.paramiko.org
+    client = paramiko.SSHClient()
+    client.load_system_host_keys()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    try:
+        client.connect(host, username=username)
+        sftp = paramiko.SFTPClient.from_transport(client.get_transport())
+        # upload
+        print "Uploading file '%s' on '%s:%s' with user '%s'" % (src, host, dst, username)
+        sftp.put(src, dst)
+        sftp.close()
+        client.close()
+    except paramiko.ssh_exception.AuthenticationException:
+        print "Cannot connect to %s with %s" % (host, username)
+        sys.exit(1)
+
+
+def read_file(filename):
+    """Read input file and remove the comments"""
+    result = []
+    try:
+        with open(filename) as f:
+            for line in f:
+                if line.strip() and not line.strip().startswith('#'):
+                    result.append(line.strip())
+        return result
+    except IOError as e:
+        print "%s : %s" % (filename, e.strerror)
+        sys.exit(1)
+
+
+def extract(start_date, period, filename):
+    """Extract the hosts to disable from the patchxpress database"""
+
+    # Retrieve the list of servers to disable for the period specify
+    command = 'listcron.py -s %s -n %s' % (start_date, period)
+    # the connection to the admin server is nominative
+    username = getpass.getuser()
+    result, return_code = run_ssh_command(admin_server, command, username)
+    server_to_disable = [ line.strip() for line in result ]
+    # write the list of hosts in a file
+    with open(filename, 'w') as f:
+        for server in server_to_disable:
+            f.write('%s\n' % server)
+    print "Output file is %s" % filename
+
+
+def enable(input, output, username):
+    """Enable patch management"""
+
+    # Retrieve the list of servers to enable
+    server_to_enable = read_file(input)
+
+    # Connect on each server and execute the command to enable patch management
+    with open(output, 'w') as f:
+        for server in server_to_enable:
+            result, return_code = run_ssh_command(server, command_to_enable_patch_mgmt, username)
+            f.write("%s:%s\n" % (server, return_code))
+
+
+def disable(input, output, username):
+    """Disable patch management"""
+
+    # Retrieve the list of servers to disable
+    server_to_disable = read_file(input)
+
+    # Connect on each server and execute the command to disable patch management
+    with open(output, 'w') as f:
+        for server in server_to_disable:
+            result, return_code = run_ssh_command(server, command_to_disable_patch_mgmt, username)
+            f.write("%s:%s\n" % (server, return_code))
+
+
+def main():
+    usage = """Usage: %prog [options]
+            [--extract [--start-date YYYYMMDD][--period 24]
+            [--disable --input filename --role isaac_user]
+            [--enable  --input filename --role isaac_user]
+            """
+    parser = OptionParser(usage=usage)
+
+    # Act As Options
+    parser.add_option("--role",
+        dest="role",
+        help="ISaAC role to use for the connection to the remote hosts"
+        )
+
+    # Common Options
+    parser.add_option("--input",
+        dest="input",
+        metavar="FILE",
+        help="Input file",
+        )
+
+    # Extraction Options
+    group = OptionGroup(parser, "Extract Options")
+    group.add_option("--extract",
+        action="store_true",
+        dest="extract",
+        help="Extract a list of server"
+        )
+    group.add_option("--start-date",
+        dest="start_date",
+        metavar="YYYYMMDD",
+        default=datetime.now().strftime('%Y%m%d'),
+        help="Planification date. The default is today.",
+        )
+    group.add_option("--period",
+        dest="period",
+        default="24",
+        help="Period of time (in hours) to check starting from start-date. The default is 24.",
+        )
+    parser.add_option_group(group)
+
+    # Disable Options
+    group = OptionGroup(parser, "Disable Options")
+    group.add_option("--disable",
+        action="store_true",
+        dest="disable",
+        help="Disable patch management for servers in input file.",
+        )
+    parser.add_option_group(group)
+
+    # Enable Options
+    group = OptionGroup(parser, "Enable Options")
+    group.add_option("--enable",
+        action="store_true",
+        dest="enable",
+        help="Enable patch management for server in input file.",
+        )
+    parser.add_option_group(group)
+
+    (options, args) = parser.parse_args()
+
+    # Control the options
+    if (bool(options.enable) + bool(options.disable) + bool(options.extract)) > 1:
+        parser.error("options `--enable`, `--disable` and `--extract` are mutually exclusive")
+
+
+    # Role is only necessary for disable and enable options
+    if options.disable or options.enable:
+        if not options.role:
+            parser.error("option role is mandatory, autorized role are : %s" % ', '.join(roles))
+        elif options.role not in roles:
+            parser.error("authorized role are : %s" % ', '.join(roles))
+
+    # Output files
+    prog = os.path.basename(sys.argv[0])
+    timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    output_file_disable = '-'.join([prog, 'disable', timestamp, das])
+    output_file_enable  = '-'.join([prog, 'enable', timestamp, das])
+    output_file_extract = '-'.join([prog, 'extract', timestamp, options.period, das])
+
+    # Extraction
+    if options.extract:
+        extract(options.start_date, options.period, output_file_extract)
+        # upload file to have a copy in our repo
+        upload(admin_server, output_file_extract, os.path.join(admin_repo_log, output_file_extract), das)
+
+    # Disable
+    if options.disable:
+        if options.input:
+            disable(options.input, output_file_disable, options.role)
+            upload(admin_server, output_file_disable, os.path.join(admin_repo_log, output_file_disable), das)
+            os.remove(output_file_disable)
+        else:
+            parser.error("You must provide an input file.")
+
+    # Enable
+    if options.enable:
+        if options.input:
+            enable(options.input, output_file_enable, options.role)
+            upload(admin_server, output_file_enable, os.path.join(admin_repo_log, output_file_enable), das)
+            os.remove(output_file_enable)
+        else:
+            parser.error("You must provide an input file.")
+
+
+if  __name__ == '__main__':
+    main()
+
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4

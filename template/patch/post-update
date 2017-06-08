@@ -1,0 +1,19 @@
+#!/bin/bash
+# force prelink to avoid tripwire alert at day+1
+#/etc/cron.daily/prelink
+
+# force permissions on critical files
+chmod 400 /etc/crontab
+chmod 600 /etc/cron.deny
+chmod 700 /root
+
+# change /bin/su permission
+chown root.system /bin/su
+chmod 4750 /bin/su
+
+# change default umask
+grep -q 'umask 027' /etc/init.d/functions || sed -i 's/umask 022/umask 027/' /etc/init.d/functions
+
+# patch service command
+grep -q ' >/proc/self/loginuid' /sbin/service || sed -i '/. \/etc\/init.d\/functions/i \
+echo $(id nobody -u) >/proc/self/loginuid' /sbin/service

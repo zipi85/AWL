@@ -1,0 +1,2 @@
+# clean up yum cache directory because the cloned repos piled up over time. 
+15 03 * * * root /bin/rm -rf /var/cache/yum/* &> /dev/null

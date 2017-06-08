@@ -1,0 +1,2 @@
+# allow integ to modify watchdog config
+integ   ALL = (root)    NOPASSWD: /opt/local/watch_script/Watchdog_LWDA_menu.ksh

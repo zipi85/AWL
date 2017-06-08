@@ -1,0 +1,218 @@
+#!/usr/bin/perl -w
+#
+# This script is *NOT* a subtitute to sudo and its `sudo -l` output.
+# It provides an easy way to list the commands available for an application for oper, integ or www.
+#
+# The need comes from the implementation of sudo decides with INT team.
+# At the creation of a new application, sysadmin allows :
+#   - *integ* to log on as the user and to execute any commands.
+#   - *oper* to execute scripts in /home/user/sudo_cmd_oper/
+#   - *www* to execute scripts in /home/user/sudo_cmd_www/
+#
+# Example 
+# =======
+# (user) NOPASSWD: ALL
+# (user) NOPASSWD: /home/user/sudo_cmd_integ/
+# (user) NOPASSWD: /home/user/sudo_cmd_oper/
+# (user) NOPASSWD: /home/user/sudo_cmd_www/
+# 
+#
+# Versions  
+# ========
+# - 1.0 : script shell provides by INT
+# - 2.0 : SYS.BFI_MON was asked to take over. 
+#         Rewrite in perl 
+#
+#------------------------------------------------------------------------------
+use strict;
+use warnings;
+
+use User::pwent;
+use File::Spec;
+use Term::ANSIColor;
+
+sub usage {
+    print STDERR "usage : $0 [username][-h]\n";
+    exit(-1);
+}
+
+sub help {
+    print STDERR << "END"; 
+
+    This script is *NOT* a subtitute to sudo and its `sudo -l` output.
+    It provides an easy way to list the commands available for an application.
+    
+    usage : $0 [username][-h]
+
+END
+exit(-1);
+}
+
+sub print_red {
+    my $msg = shift;
+    print color("red"), $msg, color("reset");
+}
+
+sub print_green {
+    my $msg = shift;
+    print color("green"), $msg, color("reset");
+}
+
+sub get_available_users {
+    # Return a list of users you are allowed to log on.     
+    my @allowed_users;
+
+    # capture users in the parentheses, e.g.
+    # $ sudo -l
+    # (utk, uka, ukp, uki, ukr) NOPASSWD: ALL	
+    # (ukq) NOPASSWD: ALL
+    my $pattern = qr{ \((.*)\)\s*NOPASSWD\s*:\s*ALL }x; 
+    my @output = qx{sudo -l};
+    my @capture;
+
+    foreach (@output) {
+        if ( $_ =~ m/$pattern/ ) {
+            push(@capture, $1);
+        }
+    }
+
+    # split the capture to retrieve every users
+    # and remove white space.
+    foreach (@capture) {
+        push(@allowed_users, split(/\s*,\s*/, $_));
+    }
+    return @allowed_users;
+}
+
+
+sub print_available_users {
+    my @allowed_users = get_available_users() ;
+
+    if (!(@allowed_users)) {
+        print_red "Users you can log on : None\n";
+        exit(0);
+    }
+
+    print_green "Users you can log on : \n";
+    foreach (get_available_users()) {
+        print "$_ \n";
+    }
+}
+
+
+sub get_available_commands {
+    # Return a list containing the commands available for a user
+    my $user = shift;
+    my $id = $ENV{USER};
+    my $homedir = "/home/$user";
+    my $cmddir = "$homedir/sudo_cmd_$id";
+    my @commands;
+
+    if (!getpwnam($user)) {
+        print STDERR "User $user does not exist.\n";
+        exit(1);
+    }
+
+    if (! -x $homedir) {
+        print STDERR "Wrong permissions on $homedir, expecting 755.\n";
+        exit(1);
+    }
+
+    if (! -d $cmddir) {
+        print STDERR "Directory $cmddir does not exist.\n";
+        exit(1);
+    }
+
+    # Make sure the user is allowed to list $cmddir via sudo
+    # or else it will ask for a password.
+    if ($id eq "oper" or $id eq "www") {
+        my $pattern = qr{\($user\)\s*NOPASSWD\s*:\s*/bin/ls\s+-1\s+$cmddir}x;
+        my @output = qx{sudo -l};
+        my $count = grep(/$pattern/, @output);
+
+        if (! $count) {
+            print STDERR "You are not allowed to list the directory $cmddir.\n";
+            exit(1);
+        }
+    }
+
+
+    # List the files in $cmddir
+    my @output = qx{sudo -u $user ls -1 $cmddir 2>/dev/null};
+    chomp(@output);
+
+    # Add the absolute path 
+    if (@output) {
+        foreach (@output) {
+            push(@commands, File::Spec->catfile($cmddir, $_)) 
+        }
+    }
+    return @commands;
+}
+
+sub print_available_commands {
+    my $user = shift;
+    my @commands = get_available_commands($user);
+    my @allowed_users = get_available_users();
+
+    if (grep {$_ eq $user} @allowed_users) {
+        # if you can log on, you can also execute any commands as the user.
+        print_green "Log on with the command : \n";
+        print "sudo -u $user -i \n";
+        print_green "Commands available as user $user : \n";
+        print "sudo -u $user <any command> \n";
+        foreach (@commands) {
+            print "sudo -u $user $_ \n";
+        }
+    } elsif (@commands) {
+        # if you are not allowed to log on, you can only execute a limited numbers of command.
+        print_green "Commands available as user $user : \n";
+        foreach (@commands) {
+            print "sudo -u $user $_ \n";
+        }
+    } else {
+        print_red "No command available as user $user.\n";
+    }
+}
+
+
+#--------------------------------------------------
+#                     MAIN                   
+#--------------------------------------------------
+
+sub main {
+    # Keep the same functioning as version 1.0
+    #   - no arg => list available user
+    #   - arg => list commands available for this user
+    #   - -h => help (add in 2.0)
+    my $arg = $ARGV[0];
+
+    if (defined($arg) && $arg eq "-h") {
+        help();
+    }
+
+
+    # Only these users can execute the script 
+    # (because of the implementation)
+    my @authorized_id = qw(integ oper www);
+    my $id = $ENV{USER};
+    if (! grep {$_ eq $id} @authorized_id) {
+        print STDERR "You are not allowed to execute $0.\n";
+        exit(-1);
+    }
+
+
+    if (!defined($arg) ) {        
+        print_available_users();
+    } else {
+        # make sure user exists.
+        if (getpwnam($arg)) {
+            print_available_commands($arg);
+        } else {
+            print STDERR "User $arg does not exist.\n";
+            usage();
+        }       
+    }
+}
+
+main();

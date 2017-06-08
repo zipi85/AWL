@@ -1,0 +1,3 @@
+# remove the official centos repos after an update
+centos-release:install:rm -f /etc/yum.repos.d/CentOS-*.repo
+centos-release:update:rm -f /etc/yum.repos.d/CentOS-*.repo

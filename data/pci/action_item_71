@@ -1,0 +1,20 @@
+#!/bin/bash 
+timestart=$(date +'%m/%d/%Y %T')
+PATH=/sbin:$PATH
+export PATH
+HOSTNAME=$(hostname)
+FIC=/home/$SUDO_USER/$HOSTNAME-$(basename $0)-$(date +%Y).txt
+touch $FIC
+> $FIC
+chown $SUDO_USER $FIC
+
+echo "###########################################################" >>$FIC
+date >$FIC
+echo "###########################################################" >>$FIC
+
+echo "Installed rpms" >>$FIC
+sudo rpm -qa --last|nl|sed "s/^/[installed:] /">>$FIC
+echo "###########################################################" >>$FIC
+
+echo "End of script" >>$FIC
+

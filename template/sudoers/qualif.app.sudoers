@@ -1,0 +1,25 @@
+# APPLICATION %(APP)s
+
+## Droits pour integ, www et oper sur l'application
+integ,%%UsrIntegrator  ALL = (%(app)s) NOPASSWD: ALL
+## For qualification environment unrestricted sudo is granted to Application managers
+www,%%UsrAppManager  ALL = (%(app)s) NOPASSWD: ALL
+
+## Commandes
+Cmnd_Alias      REP_INTEG_%(APP)s = /home/%(app)s/sudo_cmd_integ/
+Cmnd_Alias      REP_OPER_%(APP)s = /home/%(app)s/sudo_cmd_oper/
+Cmnd_Alias      REP_WWW_%(APP)s = /home/%(app)s/sudo_cmd_www/
+Cmnd_Alias      CMD_WWW_%(APP)s = /bin/ls *, \
+ /usr/bin/less *, ! /usr/bin/less *tomee.xml*, ! /usr/bin/less *auth.properties* , ! /usr/bin/less *openejb.xml*, ! /usr/bin/less */certs/jks/* ,\
+ /bin/zcat *, ! /bin/zcat *tomee.xml*, ! /bin/zcat *auth.properties* , ! /bin/zcat *openejb.xml*, ! /bin/zcat */certs/jks/* ,\
+ /usr/bin/tail *, ! /usr/bin/tail *tomee.xml*, ! /usr/bin/tail *auth.properties* , ! /usr/bin/tail *openejb.xml*, ! /usr/bin/tail */certs/jks/*
+
+integ,%%UsrIntegrator ALL=(%(app)s)  NOPASSWD: REP_INTEG_%(APP)s
+oper,%%UsrOperator    ALL=(%(app)s)  NOPASSWD: REP_OPER_%(APP)s
+oper,%%UsrOperator    ALL=(%(app)s)  NOPASSWD: /bin/ls -1 /home/%(app)s/sudo_cmd_oper
+www,%%UsrAppManager   ALL=(%(app)s)  NOPASSWD: REP_WWW_%(APP)s
+www,%%UsrAppManager   ALL=(%(app)s)  NOPASSWD: /bin/ls -1 /home/%(app)s/sudo_cmd_www
+www,%%UsrAppManager   ALL=(%(app)s)  NOPASSWD: CMD_WWW_%(APP)s
+
+## servicetools
+%(app)s           ALL=(root)     NOPASSWD: SERVICE_TOOLS

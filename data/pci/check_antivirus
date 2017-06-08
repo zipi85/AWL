@@ -1,0 +1,54 @@
+#!/bin/bash 
+timestart=$(date +'%m/%d/%Y %T')
+PATH=/sbin:$PATH
+export PATH
+HOSTNAME=$(hostname)
+#FIC=/home/$SUDO_USER/$HOSTNAME-antivirus-audit-$(date +%Y).txt
+FIC=/home/$SUDO_USER/$HOSTNAME-$(basename $0)-$(date +%Y).txt
+touch $FIC
+> $FIC
+chown $SUDO_USER $FIC
+
+echo "###########################################################" >>$FIC
+date >$FIC
+echo "###########################################################" >>$FIC
+
+echo "Installed Rpms" >>$FIC
+rpm -qa |grep clam|sed "s/^/[installed_rpm:] /" >>$FIC
+echo "###########################################################" >>$FIC
+
+echo "Signature Update" >>$FIC
+if [ -f /etc/cron.d/freshclam ]; then
+    cat /etc/cron.d/freshclam|sed "s/^/[cron_signature_update] /" >>$FIC
+elif [ -f /etc/cron.daily/freshclam ]; then
+    ls -l /etc/cron.daily/freshclam|sed "s/^/[cron_signature_update] /" >>$FIC
+else
+    echo [cron_signature_update] : /etc/cron.d/freshclam missing>>$FIC
+fi
+if [ -f /var/log/clamav/freshclam.log ] ;then
+    tail -n20 /var/log/clamav/freshclam.log|sed "s/^/[log_signature_update] /">>$FIC
+else
+    echo '/var/log/clamav/freshclam.log not found'|sed "s/^/[log_signature_update] /">>$FIC
+fi
+echo "###########################################################" >>$FIC
+
+echo "Clamscan schedule and result" >>$FIC
+if [ -f /etc/cron.d/clamscan ]; then
+    cat /etc/cron.d/clamscan|sed "s/^/[cron_clamscan] /" >>$FIC
+else
+    crontab -l|grep clamscan|sed "s/^/[cron_clamscan] /" >>$FIC
+fi
+fresult=$(ls -1tr /var/log/clamav/clamscan.log.*|tail -n1)
+if [ -n "$fresult" ]; then
+    ls -l $fresult|sed "s/^/[scan_result_file] /" >>$FIC
+    tail $fresult|sed "s/^/[scan_result] /" >>$FIC
+else
+    echo "No log file found "|sed "s/^/[scan_result_file] /" >>$FIC
+fi
+
+echo "###########################################################" >>$FIC
+echo "Script with central logginng">>$FIC
+cat /usr/local/etc/clamscan|sed "s/^/[clamscan_script] /" >>$FIC
+echo "###########################################################" >>$FIC
+echo "End of script" >>$FIC
+

@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# Scan Anti-virus du serveur
+#
+auditctl -A  never,exit -F arch=x86_64 -S all -F pid=$$
+auditctl -A  never,exit -F arch=x86_64 -S all -F ppid=$$
+auditctl -A  never,exit -F arch=i386 -S all -F pid=$$
+auditctl -A  never,exit -F arch=i386 -S all -F ppid=$$
+auditctl -l
+/usr/bin/renice +10 $$
+
+DATE=`date +%y%m%d`
+CLAMSCAN=/usr/bin/clamscan
+D_LOG=/var/log/clamav
+
+# version ClamAV
+VERSION=`$CLAMSCAN -V | grep -o -P "\d+\.\d+\.\d+"`
+
+# Lancement du scan avec exclusion de /proc /sys /dev
+# et du repertoire contenant les virus de "test" fournit dans le rpm
+#
+# Envoi des logs dans un fichier et sur le concentrateur de log via logger
+if [ -x $CLAMSCAN ]; then
+    $CLAMSCAN / --recursive --infected \
+                --exclude-dir=/proc/ \
+                --exclude-dir=/sys/ \
+                --exclude-dir=/dev/ \
+                --exclude-dir=/NAS_SPOOL/ \
+                --exclude-dir=/NAS_SHARE/ \
+                --exclude-dir=/NAS_SHARE2/ \
+                --exclude-dir=/NAS_LOGS/ \
+                --exclude-dir=/NAS_SECUR/ \
+                --exclude-dir=/spsips01v_SPOOL/ \
+                --exclude-dir=/spsips01s_SPOOL/ \
+                --exclude-dir=/spsips02v_SPOOL/ \
+                --exclude-dir=/spsips02s_SPOOL/ \
+                --exclude-dir=/spsips03v_SPOOL/ \
+                --exclude-dir=/spsips03s_SPOOL/ \
+                --exclude-dir=/spsips04v_SPOOL/ \
+                --exclude-dir=/spsips04s_SPOOL/ \
+                --exclude-dir=/usr/share/doc/clamav-${VERSION}/test/ \
+                --stdout | /usr/bin/tee $D_LOG/clamscan.log.$DATE | /usr/bin/logger -p daemon.info
+fi
+
+# Epuration des fichiers a 60 jours
+find $D_LOG -mtime +60 -name clamscan.log.?????? -exec rm -f {} \;
+
+auditctl -d  never,exit -F arch=x86_64 -S all -F pid=$$
+auditctl -d  never,exit -F arch=x86_64 -S all -F ppid=$$
+auditctl -d  never,exit -F arch=i386 -S all -F pid=$$
+auditctl -d  never,exit -F arch=i386 -S all -F ppid=$$
+
+exit 0
