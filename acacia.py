@@ -1,6 +1,6 @@
 from fabric.api import task, hide, sudo
 
-
+ 
 @task
 def update_agent():
     """update acacia-agent"""
