@@ -16,7 +16,7 @@ sssd_tar = 'sssd.tar'
 username = getpass.getuser()
 
 def is_rpm_installed(rpm):
-    """Query a rpm"""
+    """Query a rpm  """
     result = sudo(('rpm -q %s') % (rpm), warn_only=True)
     return result
 
@@ -67,11 +67,11 @@ def install_iam(secdom=None, token=False):
     # pass env as dict to template
     env.secdom = secdom
 
-	# select the template for sssd.conf
+    # select the template for sssd.conf
     if token:
 		source_conf = os.path.join(source, 'sssd.conf.token')
     else:
-    	source_conf = os.path.join(source, 'sssd.conf')
+        source_conf = os.path.join(source, 'sssd.conf')
 
     install_sssd()
     dest = '/etc/sssd/sssd.conf'
